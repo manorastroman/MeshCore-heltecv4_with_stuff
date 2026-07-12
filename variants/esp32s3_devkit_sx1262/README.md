@@ -35,6 +35,99 @@ The BOOT button (GPIO0) wakes the display; it turns itself off again after
 about 20 seconds. Avoid repurposing GPIOs 19/20 (USB), 26-37 (flash + octal
 PSRAM), 43/44 (UART0), 0/3/45/46 (strapping), and 48 (onboard WS2812 LED).
 
+## Perfboard build (70 x 90 mm)
+
+Physical layout on the 70x90 mm board from the Elegoo Double Sided PCB Kit.
+Coordinates are `row,column`; the devkit occupies rows e-z with its pin headers
+in columns `n` and `x`.
+
+### ESP32-S3 devkit placement
+
+| Row | col n | col x |
+|-----|-------|-------|
+| e | GND | GND |
+| f | 5V  | GND |
+| g | 14  | 19  |
+| h | 13  | 20  |
+| i | 12  | 21  |
+| j | 11  | 47  |
+| k | 10  | 48  |
+| l | 9   | 45  |
+| m | 46  | 0   |
+| n | 3   | 35  |
+| o | 8   | 36  |
+| p | 18  | 37  |
+| q | 17  | 38  |
+| r | 16  | 39  |
+| s | 15  | 40  |
+| t | 7   | 41  |
+| u | 6   | 42  |
+| v | 5   | 2   |
+| w | 4   | 1   |
+| x | RST | RX  |
+| y | 3V3 | TX  |
+| z | 3V3 | GND |
+
+### SX1262 breakout
+
+| Src pin | Name  | Dest pin | Net |
+|---------|-------|----------|-----|
+| c,c | BUSY  | l,n | GPIO 9  |
+| c,d | RESET | g,n | GPIO 14 |
+| c,e | MISO  | h,n | GPIO 13 |
+| c,f | MOSI  | j,n | GPIO 11 |
+| c,g | CLK   | i,n | GPIO 12 |
+| c,h | CS    | k,n | GPIO 10 |
+| c,i | GND   | f,x | GND |
+| c,j | ANT   | n/c | (RF via the module's antenna connector) |
+| i,c | 3V3   | y,n | 3V3 |
+| i,d | GND   | f,x | GND |
+| i,e | DIO1  | o,n | GPIO 8  |
+| i,f | DIO2  | n/c | — |
+| i,g | TXEN  | s,n | GPIO 15 |
+| i,h | RXEN  | r,n | GPIO 16 |
+| i,i | GND   | f,x | GND |
+| i,j | GND   | f,x | GND |
+
+Never transmit without an antenna attached — it can damage the radio's PA.
+
+### DS3231 RTC (OLED daisy-chains off its passthrough header)
+
+| Src pin | Name | Dest pin | Net |
+|---------|------|----------|-----|
+| l,d | GND | f,x | GND |
+| l,e | VCC | y,n | 3V3 |
+| l,f | SDA | q,n | GPIO 17 |
+| l,g | SCL | p,n | GPIO 18 |
+| l,h | SQW | n/c | — |
+| l,i | 32K | n/c | — |
+
+The GME128128 OLED plugs into the DS3231's passthrough header, so it shares
+the same I2C wiring (addresses don't clash: OLED 0x3C, DS3231 0x68).
+
+### Case buttons
+
+The devkit's own buttons are inaccessible inside the enclosure, so both are
+duplicated on the case — momentary normally-open switches to GND, no external
+resistors needed (both lines have pull-ups and sit in parallel with the
+onboard buttons):
+
+| Button | From | To |
+|--------|------|-----|
+| Display wake (BOOT / GPIO0) | m,x | GND |
+| Reset (RST / EN) | x,n | GND |
+
+GPIO0 is a strapping pin: held low through a reset or power-on, the S3 enters
+the USB bootloader instead of booting the firmware. Don't press the wake
+button while plugging in power — and use it deliberately (hold wake, tap
+reset, release) to reflash over USB without opening the case.
+
+### Power distribution
+
+3V3 (y,n) feeds the radio, RTC, and OLED; GND collects at f,x. With single
+plated holes rather than strips, run a short 3V3/GND bus near the modules and
+jump to the devkit pins once instead of stacking every wire on one pad.
+
 ## Build & flash
 
 ```
