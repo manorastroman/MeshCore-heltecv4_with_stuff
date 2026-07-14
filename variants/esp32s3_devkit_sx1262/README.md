@@ -2,12 +2,14 @@
 
 A MeshCore room server built from a bare ESP32-S3-WROOM-1 devkit (N16R8: 16 MB
 flash), an E22-style SX1262 LoRa breakout (with RXEN/TXEN pins), and a 1.5"
-128x128 I2C OLED (GME128128-01, SSD1327 controller) for status. An optional
+128x128 I2C OLED (GME128128-01, **SH1107** controller — Seeed U8g2 profile) for
+status. An optional
 DS3231 RTC module can be plugged into the same I2C bus at any time — it is
 auto-detected at boot and keeps the clock across power cuts.
 
-Default LoRa parameters are the MeshCore US-915 preset (910.525 MHz, BW 250,
-SF 10, CR 5). Change them at runtime via the serial CLI or the phone app.
+Default LoRa parameters (910.252 MHz, BW 62.5, SF 7, CR 5) match the local
+US-915 mesh this node joins. Change them at runtime via the serial CLI
+(`set radio <freq>,<bw>,<sf>,<cr>`) or the phone app.
 
 ## Wiring
 
@@ -31,8 +33,11 @@ SF 10, CR 5). Change them at runtime via the serial CLI or the phone app.
 | SCL | 18 |
 | VCC / GND | 3V3 / GND |
 
-The BOOT button (GPIO0) wakes the display; it turns itself off again after
-about 20 seconds. Avoid repurposing GPIOs 19/20 (USB), 26-37 (flash + octal
+This is a mains-powered node, so the display is set to stay on permanently
+(`-D AUTO_OFF_MILLIS=0`); the BOOT button (GPIO0) is therefore unused for the
+display. Set `AUTO_OFF_MILLIS` to a non-zero millisecond value if you'd rather
+have the 20-second power-save wake-on-button behaviour back. Avoid repurposing
+GPIOs 19/20 (USB), 26-37 (flash + octal
 PSRAM), 43/44 (UART0), 0/3/45/46 (strapping), and 48 (onboard WS2812 LED).
 
 ## Perfboard build (70 x 90 mm)
@@ -128,6 +133,21 @@ reset, release) to reflash over USB without opening the case.
 plated holes rather than strips, run a short 3V3/GND bus near the modules and
 jump to the devkit pins once instead of stacking every wire on one pad.
 
+### Mains supply (24/7 operation)
+
+Powered from a **7.5 V / 500 mA** wall supply through a buck converter (module
+rated 3.2-35 V in, 3 A out) set to **5 V**, feeding the devkit's **5V/VIN pin**
+(let the onboard regulator make its own 3.3 V — do not inject 5 V into 3V3).
+
+Budget check: the node draws ~90-120 mA at 5 V idle/RX and ~215 mA at SX1262
+TX peak (+22 dBm). Reflected through the buck (~90% eff.) that's only ~75 mA
+idle and ~160 mA peak drawn from the 7.5 V supply — comfortably under its
+500 mA rating (~3x headroom). The buck's 3 A capacity is never the limit.
+
+Add a bulk cap (~470 uF) on the buck's 5 V output near the board: the SX1262's
+short TX current spikes can otherwise sag the rail and trigger brownouts or
+radio init errors (-706/-707).
+
 ## Build & flash
 
 ```
@@ -139,12 +159,15 @@ The serial console is on the devkit's **native USB** port (`ARDUINO_USB_CDC_ON_B
 
 ## First-boot checklist
 
-- **OLED blank?** Some 128x128 modules use a different init sequence or
-  address. Try, in order:
-  - `-D DISPLAY_ADDRESS=0x3D` (run an I2C scanner if unsure)
-  - `-D U8G2_CONTROLLER=U8G2_SSD1327_MIDAS_128X128_F_HW_I2C`
-  - `-D U8G2_CONTROLLER=U8G2_SSD1327_EA_W128128_F_HW_I2C`
-  - `-D U8G2_CONTROLLER=U8G2_SH1107_PIMORONI_128X128_F_HW_I2C` (SH1107 panels)
+- **OLED shows snow / static?** The panel is alive and addressed, but the
+  controller family is wrong. The GME128128-01 is an **SH1107**, not an SSD1327
+  (verified against a known-good driver for this exact panel). The working
+  config is `-D U8G2_CONTROLLER=U8G2_SH1107_SEEED_128X128_F_HW_I2C`.
+- **Image legible but shifted ~1/4 screen left?** Right controller, wrong
+  x-offset. The generic `U8G2_SH1107_128X128` profile uses `x_offset=96`; this
+  panel needs `0`, which is what the `_SEEED_` (or `_PIMORONI_`) profile sets.
+- **OLED totally blank?** Wrong I2C address — try `-D DISPLAY_ADDRESS=0x3D`
+  (this panel answers at 0x3C; run an I2C scanner if unsure).
 - **`radio init failed` on serial?** Error -706/-707 is retried automatically
   with the TCXO disabled (crystal-only modules). Any other persistent code
   means wiring — recheck NSS(10) and BUSY(9) first.
