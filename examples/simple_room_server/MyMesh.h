@@ -182,6 +182,11 @@ public:
     return &_prefs;
   }
 
+  // Lightweight accessors for the status display (UITask)
+  uint32_t getUptimeSecs() const { return (uint32_t)(uptime_millis / 1000); }
+  int getNumClients() { return acl.getNumClients(); }
+  uint16_t getNumPosted() const { return _num_posted; }
+
   void savePrefs() override {
     _cli.savePrefs(_fs);
   }

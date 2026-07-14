@@ -34,7 +34,9 @@ class U8g2Display : public DisplayDriver {
   uint8_t _fontHeight;
 
   void applyFont(int sz) {
-    if (sz >= 2) {
+    if (sz >= 3) {
+      _u8g2.setFont(u8g2_font_10x20_mr); // large font for headline stats (e.g. clock) on big panels
+    } else if (sz >= 2) {
       _u8g2.setFont(u8g2_font_6x10_mr); // slightly larger font for better readability. TODO: more font sizes?
     } else {
       _u8g2.setFont(u8g2_font_5x7_mr);

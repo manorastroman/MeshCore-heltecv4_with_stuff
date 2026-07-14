@@ -1,12 +1,33 @@
 #include "UITask.h"
+#include "MyMesh.h"
 #include <Arduino.h>
+#include <time.h>
 #include <helpers/CommonCLI.h>
 
 #ifndef USER_BTN_PRESSED
 #define USER_BTN_PRESSED LOW
 #endif
 
-#define AUTO_OFF_MILLIS      20000  // 20 seconds
+// ---- 12x12 status icons (XBM, LSB-first) --------------------------------
+static const uint8_t icon_signal [] PROGMEM = {   // rising signal bars -> radio
+  0x00,0x06, 0x00,0x06, 0x00,0x06, 0xC0,0x06, 0xC0,0x06, 0xC0,0x06,
+  0xD8,0x06, 0xD8,0x06, 0xD8,0x06, 0xDB,0x06, 0xDB,0x06, 0xDB,0x06 };
+static const uint8_t icon_people [] PROGMEM = {   // person -> clients
+  0x00,0x00, 0xF0,0x00, 0xF0,0x00, 0xF0,0x00, 0x00,0x00, 0xF8,0x01,
+  0xFC,0x03, 0xFC,0x03, 0xFC,0x03, 0xFC,0x03, 0xFC,0x03, 0x00,0x00 };
+static const uint8_t icon_mail [] PROGMEM = {     // envelope -> messages
+  0x00,0x00, 0xFF,0x07, 0x01,0x04, 0x03,0x06, 0x8D,0x05, 0x71,0x04,
+  0x01,0x04, 0x01,0x04, 0x01,0x04, 0x01,0x04, 0xFF,0x07, 0x00,0x00 };
+static const uint8_t icon_clock [] PROGMEM = {    // clock -> uptime
+  0xF0,0x00, 0x0C,0x03, 0x02,0x04, 0x22,0x04, 0x21,0x08, 0xE1,0x08,
+  0x01,0x08, 0x02,0x04, 0x02,0x04, 0x0C,0x03, 0xF0,0x00, 0x00,0x00 };
+
+static const char* const MONTHS[] = {
+  "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec" };
+
+#ifndef AUTO_OFF_MILLIS
+#define AUTO_OFF_MILLIS      20000  // 20 seconds (0 = never auto-off; stays on for mains-powered nodes)
+#endif
 #define BOOT_SCREEN_MILLIS   4000   // 4 seconds
 
 // 'meshcore', 128x13px
@@ -26,9 +47,10 @@ static const uint8_t meshcore_logo [] PROGMEM = {
     0xe3, 0xe3, 0x8f, 0xff, 0x1f, 0xfc, 0x3c, 0x0e, 0x1f, 0xf8, 0xff, 0xf8, 0x70, 0x3c, 0x7f, 0xf8, 
 };
 
-void UITask::begin(NodePrefs* node_prefs, const char* build_date, const char* firmware_version) {
+void UITask::begin(MyMesh* mesh, NodePrefs* node_prefs, const char* build_date, const char* firmware_version) {
   _prevBtnState = HIGH;
   _auto_off = millis() + AUTO_OFF_MILLIS;
+  _mesh = mesh;
   _node_prefs = node_prefs;
   _display->turnOn();
 
@@ -72,7 +94,9 @@ void UITask::renderCurrScreen() {
     uint16_t typeWidth = _display->getTextWidth(node_type);
     _display->setCursor((_display->width() - typeWidth) / 2, 48);
     _display->print(node_type);
-  } else {  // home screen
+  } else if (_mesh != NULL && _display->height() >= 128) {  // rich status card on large panels
+    renderStatusCard();
+  } else {  // compact home screen (small panels)
     // node name
     _display->setCursor(0, 0);
     _display->setTextSize(1);
@@ -90,6 +114,78 @@ void UITask::renderCurrScreen() {
     sprintf(tmp, "BW: %03.2f CR: %d", _node_prefs->bw, _node_prefs->cr);
     _display->print(tmp);
   }
+}
+
+// A designed status card for 128x128 (SH1107/SSD1327-class) panels:
+// inverted title bar, icon-labelled stat rows, dividers, and a large clock.
+void UITask::renderStatusCard() {
+  char tmp[40];
+  const int W = _display->width();
+
+  // --- title bar: node name, black-on-white ---
+  _display->setColor(DisplayDriver::LIGHT);
+  _display->fillRect(0, 0, W, 15);
+  _display->setColor(DisplayDriver::DARK);   // draw "off" pixels -> inverted text
+  _display->setTextSize(2);
+  _display->drawTextCentered(W / 2, 3, _node_prefs->node_name);
+
+  _display->setColor(DisplayDriver::LIGHT);
+
+  // --- radio: signal icon + freq + mode ---
+  _display->drawXbm(3, 20, icon_signal, 12, 12);
+  _display->setTextSize(1);
+  sprintf(tmp, "%.3f MHz", _node_prefs->freq);
+  _display->setCursor(20, 20);
+  _display->print(tmp);
+  sprintf(tmp, "BW%g SF%d CR%d", _node_prefs->bw, _node_prefs->sf, _node_prefs->cr);
+  _display->setCursor(20, 30);
+  _display->print(tmp);
+
+  // --- divider ---
+  _display->fillRect(3, 42, W - 6, 1);
+
+  // --- clients | messages: icon + big number ---
+  _display->drawXbm(3, 48, icon_people, 12, 12);
+  _display->setTextSize(2);
+  sprintf(tmp, "%d", _mesh->getNumClients());
+  _display->setCursor(20, 49);
+  _display->print(tmp);
+  _display->setTextSize(1);
+  _display->setCursor(20, 62);
+  _display->print("clients");
+
+  _display->drawXbm(W / 2 + 3, 48, icon_mail, 12, 12);
+  _display->setTextSize(2);
+  sprintf(tmp, "%u", (unsigned)_mesh->getNumPosted());
+  _display->setCursor(W / 2 + 20, 49);
+  _display->print(tmp);
+  _display->setTextSize(1);
+  _display->setCursor(W / 2 + 20, 62);
+  _display->print("msgs");
+
+  // --- uptime ---
+  _display->drawXbm(3, 72, icon_clock, 12, 12);
+  uint32_t up = _mesh->getUptimeSecs();
+  uint32_t d = up / 86400, h = (up % 86400) / 3600, m = (up % 3600) / 60;
+  if (d > 0) sprintf(tmp, "up %lud %02lu:%02lu", (unsigned long)d, (unsigned long)h, (unsigned long)m);
+  else       sprintf(tmp, "up %02lu:%02lu:%02lu", (unsigned long)h, (unsigned long)m, (unsigned long)(up % 60));
+  _display->setTextSize(1);
+  _display->setCursor(20, 75);
+  _display->print(tmp);
+
+  // --- divider ---
+  _display->fillRect(3, 88, W - 6, 1);
+
+  // --- big clock + date (phone-synced RTC) ---
+  time_t now = (time_t)_mesh->getRTCClock()->getCurrentTime();
+  struct tm t;
+  gmtime_r(&now, &t);
+  _display->setTextSize(3);
+  sprintf(tmp, "%02d:%02d", t.tm_hour, t.tm_min);
+  _display->drawTextCentered(W / 2, 94, tmp);
+  _display->setTextSize(1);
+  sprintf(tmp, "%d %s %d", t.tm_mday, MONTHS[t.tm_mon % 12], t.tm_year + 1900);
+  _display->drawTextCentered(W / 2, 116, tmp);
 }
 
 void UITask::loop() {
@@ -119,8 +215,10 @@ void UITask::loop() {
 
       _next_refresh = millis() + 1000;   // refresh every second
     }
+#if AUTO_OFF_MILLIS > 0
     if (millis() > _auto_off) {
       _display->turnOff();
     }
+#endif
   }
 }
